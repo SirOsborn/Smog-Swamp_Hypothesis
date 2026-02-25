@@ -194,7 +194,7 @@ Anti-pollution interventions (burn bans, vehicle emission controls) will *not* r
 
 ```
 assADS/
-├── Heng_assignmentADS.ipynb     ← Full analysis notebook (open this)
+├── Smog&Swamp_Hypothesis.ipynb  ← Full analysis notebook (open this)
 ├── README.md
 ├── .gitignore
 ├── images/                      ← All output charts & figures
@@ -233,7 +233,7 @@ python -m venv .venv
 pip install numpy pandas matplotlib seaborn scipy statsmodels plotly nbformat
 
 # 4. Open the notebook
-jupyter notebook Heng_assignmentADS.ipynb
+jupyter notebook Smog\&Swamp_Hypothesis.ipynb
 # or open in VS Code and run all cells
 ```
 
