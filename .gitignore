@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Raw / source datasets (not tracked — too large, third-party data)
+data/116_Cambodia/
+data/air_pollutant.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
