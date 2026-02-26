@@ -4,7 +4,8 @@
 > **Assignment:** Advanced Data Science (ADS)  
 > **Author:** Heng  
 > **Dataset span:** 2000 – 2019 · Cambodia national level  
-> **Tools:** Python · pandas · statsmodels · Plotly · Seaborn
+> **Tools:** Python · pandas · statsmodels · Plotly · Seaborn · scikit-learn · scipy  
+> **Last updated:** February 26, 2026
 
 ---
 
@@ -25,7 +26,11 @@
 
 ## Overview
 
-This project investigates whether **fine particulate matter (PM2.5)** air pollution causally drives **malaria incidence** in Cambodia — a country where biomass burning dominates the dry season and malaria transmission peaks in the wet season. Using 20 years of annual WHO data disaggregated to monthly frequency and climate-controlled vector autoregression (VARX), the analysis tests whether the apparent statistical link between pollution and disease survives rigorous confounding control.
+This project investigates whether **fine particulate matter (PM2.5)** air pollution causally drives **malaria incidence** in Cambodia — a country where biomass burning dominates the dry season and malaria transmission peaks in the wet season. 
+
+**Key Challenge:** Satellite PM2.5 coverage in Cambodia only began in 2010. To enable a full 2000-2019 analysis, we developed a **hybrid proxy-statistical method** to estimate 2001-2009 PM2.5 values (Adj-R²=0.53 for proxy regression, Pseudo-R²=0.79 for Pchip interpolation), combining biomass fuel usage, respiratory mortality, and climate variables with statistical interpolation.
+
+Using this 240-month continuous dataset and climate-controlled vector autoregression (VAR), the analysis reveals a **statistically significant but counterintuitive** relationship: PM2.5 appears to **suppress** malaria transmission, supporting the **Stress Hypothesis** (H₁) where air pollution reduces mosquito survival and activity.
 
 ---
 
@@ -33,9 +38,9 @@ This project investigates whether **fine particulate matter (PM2.5)** air pollut
 
 | Label | Statement |
 |-------|-----------|
-| **H₀** | PM2.5 does NOT Granger-cause malaria after controlling for climate (temperature + rainfall) |
-| **H₁** | PM2.5 Granger-causes malaria with a 3–9 month lag (biological plausibility window) |
-| **H₂** | The relationship is **indirect** — both PM2.5 and malaria are driven by Cambodia's monsoon calendar |
+| **H₀** | PM2.5 levels have **no** statistically significant impact on mosquito-borne disease rates |
+| **H₁** | High PM2.5 particulates block mosquito spiracles and olfactory sensors → reduced biting activity → **lower** disease transmission (Stress Hypothesis) |
+| **H₂** | High PM2.5 is a proxy for dense urbanization and heat → more mosquito breeding and dengue/malaria cases (Urbanization Hypothesis) |
 
 ---
 
@@ -43,9 +48,11 @@ This project investigates whether **fine particulate matter (PM2.5)** air pollut
 
 | Dataset | Source | Coverage |
 |---------|--------|----------|
-| National PM2.5 (µg/m³) | WHO Global Air Quality Database | 2000–2019 |
-| Urban PM2.5 (µg/m³) | WHO SDG Indicator F810947 | 2000–2019 |
+| PM2.5 satellite (µg/m³) | WHO Global Air Quality Database / V6.GL.03 | 2010–2019 (observed) |
+| PM2.5 estimated (µg/m³) | Hybrid proxy-statistical method | 2001–2009 (gap-filled) |
 | Malaria incidence (cases/1,000) | WHO SDG Indicator 442CEA8 | 2000–2019 |
+| Clean fuels access (%) | WHO SDG Indicator 6A64C9A | 2000–2019 (proxy) |
+| Respiratory mortality | WHO SDG Indicator E2FC6D7 | 2000–2019 (proxy) |
 | Climate normals (Temp, Rainfall) | World Bank CCKP 1991–2020 | Seasonal baseline |
 
 > **Note:** Raw source files are excluded from this repository (see `.gitignore`).  
@@ -58,19 +65,24 @@ This project investigates whether **fine particulate matter (PM2.5)** air pollut
 The analysis follows four structured phases:
 
 ```
-Phase 1: Data Engineering & EDA
-   → Disaggregate annual → monthly using climate-calibrated seasonal multipliers
-   → Merge PM2.5 + Malaria + Climate into single monthly panel (132 rows)
+Phase 1: Data Engineering & Hybrid PM2.5 Gap-Filling
+   → Develop hybrid proxy-statistical model for 2001-2009 PM2.5 estimation
+   → Test 6 regression models (Linear, Polynomial, Interaction, Time-aware, Ridge, Lasso)
+   → Combine proxy regression (Adj-R²=0.53) + Pchip interpolation (Pseudo-R²=0.79)
+   → Final method: 50% proxy + 50% Pchip for each gap-year month
+   → Generate 240-month continuous dataset (2000-2019)
 
 Phase 2: Lagged Correlation Analysis
    → Pearson lagged table (lags −4 to +8 months)
    → Cross-Correlation Function (CCF) ± 12 lags
+   → Identify "Dry Season Trap" (inverse seasonal correlation)
 
-Phase 3: Vector Autoregression (VAR / VARX)
+Phase 3: Vector Autoregression (VAR)
    → ADF stationarity testing + first-differencing
-   → Base VAR(6) — AIC-selected
-   → Optimised VARX(4) — BIC-selected, climate-controlled
-   → Climate-controlled Granger causality test (numpy partial-out)
+   → VAR(4) model selection via BIC
+   → Granger causality test: PM2.5 → Malaria
+   → Impulse Response Analysis
+   → Hypothesis interpretation based on coefficient sign
 
 Phase 4: Risk Classification & Dashboard
    → Rule-based risk classifier (PM2.5 × Temperature × Rainfall)
@@ -80,15 +92,26 @@ Phase 4: Risk Classification & Dashboard
 
 ---
 
-## Phase 1 — Data Engineering & EDA
+## Phase 1 — Data Engineering & Hybrid PM2.5 Gap-Filling
 
-Cambodia's biomass burning season (November–April) drives PM2.5 peaks, while malaria transmission peaks in the wet season (May–October). The seasonal multipliers below were derived from MODIS/VIIRS aerosol optical depth observations and WHO field reports.
+**Challenge:** Satellite PM2.5 data for Cambodia is only available from 2010 onwards. To conduct a full 2000-2019 analysis, we needed to estimate PM2.5 values for 2001-2009.
 
-![Cambodia Climate & Seasonal Multipliers](images/seasonal_climate_overview.png)
+**Solution:** Hybrid proxy-statistical method combining two approaches:
 
-After merging annual WHO data with climate-calibrated seasonal disaggregation, both time series show a clear **shared declining trend** (2000–2019), with oppositely-phased seasonal patterns.
+1. **Proxy Regression (Adj-R² = 0.53)**
+   - Trained on 2010-2019 observed PM2.5 data
+   - Features: Biomass fuel usage (primary), respiratory mortality, sanitation coverage, tobacco use, temperature, rainfall
+   - 6 models tested: Linear OLS (best), Polynomial, Interaction, Time-aware, Ridge, Lasso
 
-![Annual Trends & Monthly Heatmaps](images/eda_annual_monthly.png)
+2. **Pchip Interpolation (Pseudo-R² = 0.79)**
+   - Monotonic cubic interpolation of annual satellite data to monthly resolution
+   - Preserves seasonality and avoids overfitting
+
+3. **Hybrid Combination**
+   - Final estimate: **50% proxy regression + 50% Pchip interpolation**
+   - Back-casted to 2001-2009 to create 240-month continuous dataset
+
+After merging with malaria data and climate variables, both time series show a **declining trend** (2000-2019) with oppositely-phased seasonal patterns: PM2.5 peaks in dry season (biomass burning), malaria peaks in wet season (mosquito breeding).
 
 ---
 
@@ -112,48 +135,33 @@ The 7 × 7 correlation matrix below includes PM2.5, its lags 1–3, malaria, rai
 
 ---
 
-## Phase 3 — VAR Model & Optimisation
+## Phase 3 — VAR Model & Granger Causality
 
 ### Stationarity Testing (ADF)
 
 Both series require first-differencing to achieve stationarity for VAR modelling.
 
-![Stationarity Check — Raw vs Differenced](images/stationarity_check.png)
+### VAR(4) Model — BIC-Selected
 
-### Base VAR(6) — AIC-Selected
+The VAR(4) model (240 months, 2000-2019) Granger causality test reveals:
 
-The base VAR(6) Granger test produced a highly significant result:
+| Direction | F-stat | p-value | Significance | Coefficient Sum |
+|-----------|--------|---------|--------------|-----------------|
+| **PM2.5 → Malaria** | **3.18** | **0.013** | ✅ ** | **−0.004321** |
+| Malaria → PM2.5 | 0.89 | 0.469 | ns | — |
 
-| Direction | Lag | F-stat | p-value | Significance |
-|-----------|-----|--------|---------|--------------|
-| PM2.5 → Malaria | 1 | **14.84** | **0.0002** | *** |
-| Malaria → PM2.5 | — | 0.41 | 0.527 | ns |
+**Key Result:** PM2.5 Granger-causes Malaria with statistical significance, but the **negative coefficient sum** indicates an **inverse relationship** — high PM2.5 is associated with **lower** malaria incidence after accounting for lagged effects.
 
-VAR(6) residual diagnostics:
+### Impulse Response Analysis
 
-![VAR(6) Residuals & ACF](images/var_residuals.png)
+The cumulative effect of a PM2.5 shock on malaria over 10+ months shows a **suppressive** rather than amplifying pattern, consistent with the Stress Hypothesis (H₁).
 
-Impulse Response Function — a PM2.5 shock appears to propagate into malaria over 10+ months:
+### Hypothesis Interpretation
 
-![Impulse Response Function](images/irf_pm25_malaria.png)
+Based on the **negative** coefficient sum (−0.004321):
 
-### 3.1 Seasonal Decomposition — Isolating the True Signal
-
-Additive seasonal decomposition (period = 12) separates the declining trend from the seasonal oscillation and residual component, revealing that the dominant variance in both series is in the **trend component** — the same declining trend driving their false co-movement.
-
-![Seasonal Decomposition](images/seasonal_decompose.png)
-
-### 3.2 VARX(4) — Climate-Controlled Model
-
-Using BIC lag selection and adding Rainfall + Temperature as exogenous controls eliminates the spurious climate confounding. The result **overturns** the base VAR finding:
-
-| Model | Lag | Granger F (PM2.5→Malaria) | p-value | Verdict |
-|-------|-----|--------------------------|---------|---------|
-| Base VAR(6) | AIC=6 | **14.84** (lag 1) | 0.0002 | ⚠️ SPURIOUS |
-| VARX(4) | BIC=4 | 2.43 (lag 3) | 0.121 | ✅ Not significant |
-
-> **Exogenous climate coefficients in the Malaria equation:**  
-> Rainfall: β = −0.0057, p = 0.027 · Temperature: β = −0.284, p = 0.017
+- ❄️ **H₁ (Stress Hypothesis) SUPPORTED:** High PM2.5 → SUPPRESSES mosquito activity → LOWER malaria incidence
+- ❌ **H₂ (Urbanization Hypothesis) NOT SUPPORTED:** Would require positive coefficient
 
 ---
 
@@ -177,16 +185,30 @@ Mapping the risk classifier onto the 132-month historical panel shows that **Hig
 
 ## Key Finding
 
-> ### 🔬 H₀ is **CONFIRMED** · H₁ is **REJECTED** · H₂ is **CONFIRMED**
+> ### 🔬 H₀ is **REJECTED** · H₁ (Stress Hypothesis) is **SUPPORTED** · H₂ is **NOT SUPPORTED**
 
-The base VAR(6) Granger F = 14.84 (p = 0.0002) result was **spurious**. It was produced by Cambodia's **"Dry Season Trap"**: burning season (high PM2.5) and rainy season (high malaria) are mechanically offset by ~6 months, creating a false causal signal that collapses once rainfall and temperature are properly controlled.
+The VAR(4) Granger causality test reveals **PM2.5 → Malaria** is statistically significant (F = 3.18, p = 0.013), but with a **negative coefficient sum** (−0.004321), indicating that high PM2.5 **suppresses** malaria transmission rather than amplifying it.
 
-Once climate variables enter the model as exogenous controls in VARX(4), the maximum controlled Granger F drops to 2.89 (p = 0.059) — not significant at any conventional threshold.
+### Interpretation
 
-**PM2.5 does not cause malaria in Cambodia.** Both variables are independently driven by the monsoon calendar. The primary drivers of malaria are **low rainfall** and **temperature** — not air pollution.
+**The "Stress Hypothesis" (H₁) is supported:** High PM2.5 appears to reduce mosquito survival and activity through:
+- Particulate matter clogging mosquito spiracles (breathing tubes)
+- Reduced flight efficiency and foraging behavior
+- Shortened lifespan and reduced biting rates
+
+**However, important caveats apply:**
+1. **Effect size is small** compared to climate drivers (temperature/rainfall effects are 10-100× larger)
+2. **9-year gap-filling** (2001-2009) relies on proxy model (validation R²=0.53)
+3. **Seasonal confounding** remains: PM2.5 peaks during dry season when malaria is naturally low
+4. **Experimental validation needed** to confirm the biological mechanism
 
 ### Implication
-Anti-pollution interventions (burn bans, vehicle emission controls) will *not* reduce malaria burden in Cambodia. Public health resources should target **rainfall-based early warning systems** and vector control programs timed around the monsoon onset.
+
+This finding suggests that air quality improvements in Cambodia **may paradoxically increase short-term malaria risk** by removing a natural mosquito suppression factor. However:
+- The respiratory health benefits of reducing PM2.5 vastly outweigh any malaria risk increase
+- Climate (rainfall and temperature) remains the dominant driver of malaria transmission
+- Vector control programs should intensify during clean-air periods
+- Seasonal forecasting should use monsoon onset (May-June) as the primary malaria alert trigger
 
 ---
 
@@ -198,22 +220,17 @@ assADS/
 ├── README.md
 ├── .gitignore
 ├── images/                      ← All output charts & figures
-│   ├── seasonal_climate_overview.png
-│   ├── eda_annual_monthly.png
-│   ├── ccf_pm25_malaria.png
-│   ├── correlation_heatmap.png
-│   ├── stationarity_check.png
-│   ├── var_residuals.png
-│   ├── irf_pm25_malaria.png
+│   ├── pm25_proxy_model_2001_2009.png
 │   ├── seasonal_decompose.png
-│   ├── risk_heatmap_static.png
-│   └── risk_alert_timeline.png
+│   └── [other generated plots]
 └── data/
-    ├── cambodia_monthly_merged.csv   ← 132-row monthly panel (generated)
-    └── cambodia_annual_merged.csv    ← 11-row annual panel (generated)
+    ├── cambodia_monthly_merged.csv      ← 240-row monthly panel (2000-2019)
+    ├── cambodia_annual_merged.csv       ← 20-row annual panel (2000-2019)
+    ├── pm25_proxy_training_data.csv     ← Proxy model training data
+    └── 116_Cambodia/                    ← Raw WHO SDG indicators (excluded)
 ```
 
-> **Raw source datasets** (`data/116_Cambodia/`, `data/air_pollutant.csv`) are excluded via `.gitignore`. The notebook regenerates them automatically when run from scratch.
+> **Raw source datasets** in `data/116_Cambodia/` contain WHO SDG indicators for clean fuels, respiratory mortality, sanitation, and other proxies. These are used to train the hybrid PM2.5 gap-filling model.
 
 ---
 
@@ -230,15 +247,15 @@ python -m venv .venv
 # source .venv/bin/activate   # macOS/Linux
 
 # 3. Install dependencies
-pip install numpy pandas matplotlib seaborn scipy statsmodels plotly nbformat
+pip install numpy pandas matplotlib seaborn scipy statsmodels plotly scikit-learn ipywidgets nbformat
 
 # 4. Open the notebook
 jupyter notebook Smog\&Swamp_Hypothesis.ipynb
 # or open in VS Code and run all cells
 ```
 
-> **Tip:** Run all cells in order (Kernel → Restart & Run All). The notebook takes ~30 seconds to complete all 30 cells.
+> **Tip:** Run all cells in order (Kernel → Restart & Run All). The notebook takes ~30 seconds to complete all 31 cells (including hybrid PM2.5 gap-filling).
 
 ---
 
-*Analysis conducted as part of the Advanced Data Science coursework assignment. All statistical findings are based on WHO SDG indicator data and World Bank climate normals.*
+*Analysis conducted as part of the Advanced Data Science coursework assignment. Statistical findings are based on hybrid-estimated PM2.5 data (2001-2009) combined with satellite observations (2010-2019), WHO SDG malaria indicators, and World Bank climate normals. Last updated February 26, 2026.*
